@@ -30,7 +30,7 @@ This project implements an unsupervised geospatial machine learning pipeline usi
 ```
 crime-hotspot-dbscan/
 ├── data/
-│   └── cleaned_crimes_2016.csv          # Preprocessed Chicago 2016 crime dataset (30.3 MB)
+│   └── cleaned_crimes_2016.csv          # Preprocessed dataset cache (auto-generated from crimes.csv)
 ├── notebooks/
 │   └── hotspot_analysis.ipynb           # Complete 10-phase Jupyter analysis notebook
 ├── outputs/
@@ -62,45 +62,142 @@ crime-hotspot-dbscan/
 
 ## ⚙️ Installation & Setup
 
-### 1. Clone or Navigate to Directory
-```bash
-cd "c:/Users/odhav/Downloads/archive (2)"
-```
 
-### 2. Install Dependencies
+### 1. Install Dependencies
 ```bash
 python -m pip install -r requirements.txt
 ```
 
 *Required libraries: `pandas`, `numpy`, `scikit-learn`, `matplotlib`, `folium`, `seaborn`, `python-docx`.*
 
+### 2. Dataset Download
+Download the Chicago Crime dataset from Kaggle:
+👉 **[Kaggle: Crimes in Chicago Dataset](https://www.kaggle.com/datasets/currie32/crimes-in-chicago)**
+
+Download the dataset and place the CSV file in the root project folder named exactly as:
+```
+crimes.csv
+```
+> [!NOTE]
+> When you run the pipeline for the first time, it automatically reads `crimes.csv` in chunks, extracts records for the target year (2016), performs coordinate boundary filtering and feature engineering, and caches the cleaned result to `data/cleaned_crimes_2016.csv`.
+
 ---
 
-## 🚀 How to Run the Project
+## 🚀 Pipeline Execution Guide
 
-### Option A: Run the End-to-End Pipeline (CLI)
-Execute the complete pipeline with default parameters (2016 dataset, sample of 50,000 incidents per blueprint Option B):
+The core execution engine is [`run_pipeline.py`](run_pipeline.py), which handles data ingestion, spatial preprocessing, elbow evaluation, DBSCAN clustering, risk profiling, evaluation metric computation, and artifact generation.
+
+### 1. Basic Execution Commands
+
 ```bash
+# Default run: sample50k mode, eps=0.20 km (200m), min_samples=25
 python run_pipeline.py
 ```
 
-#### Pipeline Options & Flags:
+### 2. Command-Line Options Reference
+
+| Flag | Type | Default | Description |
+| :--- | :---: | :---: | :--- |
+| `--scope` | `str` | `sample50k` | Data subset: `'sample50k'` (50k sample, blueprint Option B), `'theft'` (all thefts), or `'all'` (full dataset). |
+| `--eps_km` | `float` | `0.20` | DBSCAN neighborhood radius in kilometers (e.g. `0.20` = 200 meters, `0.15` = 150 meters). |
+| `--min_samples`| `int` | `25` | Minimum core incident count required to anchor a dense hotspot cluster. |
+| `--skip_grid` | `flag` | `False` | Skip sensitivity grid search across parameter combinations to speed up execution. |
+| `--data` | `str` | `crimes.csv` | Path to the raw multi-year Chicago crime records CSV. |
+| `--cached` | `str` | `data/cleaned_crimes_2016.csv` | Path to cached preprocessed CSV (auto-loaded if present; auto-created from `--data` if missing). |
+
+### 3. Practical Execution Scenarios
+
 ```bash
-# Run with a custom epsilon radius (e.g., 250 meters) and min_samples
-python run_pipeline.py --eps_km 0.25 --min_samples 35
+# Scenario A: Fast execution with fixed parameters (skipping grid search)
+python run_pipeline.py --skip_grid
 
-# Run specifically on all THEFT incidents
-python run_pipeline.py --scope theft
+# Scenario B: High-density walking patrol radius (150m, 15 incidents)
+python run_pipeline.py --eps_km 0.15 --min_samples 15
 
-# Run on the complete 2016 dataset (267k points)
+# Scenario C: Broad vehicular patrol radius (300m, 40 incidents)
+python run_pipeline.py --eps_km 0.30 --min_samples 40
+
+# Scenario D: Crime-specific focus (Detecting theft & retail corridors)
+python run_pipeline.py --scope theft --eps_km 0.18 --min_samples 20
+
+# Scenario E: Full municipal dataset run (All incidents)
 python run_pipeline.py --scope all --skip_grid
 ```
 
-### Option B: Interactive Jupyter Notebook
-Open the notebook in VS Code or JupyterLab:
-```bash
-jupyter notebook notebooks/hotspot_analysis.ipynb
+---
+
+### 🔄 When Do You Need to Run the Pipeline?
+
+You should run `python run_pipeline.py` whenever:
+
+1. **Initial Setup or Fresh Clone:** Run once to generate all diagnostic charts, the CSV registry, and the interactive Folium map in `outputs/`.
+2. **`outputs/` Files Are Missing or Deleted:** If any output charts, CSV, or HTML maps are deleted, running the pipeline will recreate the `outputs/` folder and regenerate all files.
+3. **Hyperparameter Tuning:** Whenever you want to test different spatial radii (`--eps_km`) or density thresholds (`--min_samples`) to adapt to different policing strategies (e.g. foot patrols vs. squad car patrol zones).
+4. **Scope or Crime Type Change:** When shifting focus to a specific crime category (such as `--scope theft`) or running on the complete dataset (`--scope all`).
+5. **Data Refresh:** If a new raw dataset `crimes.csv` is provided, running the pipeline extracts, cleans, and updates the cache `data/cleaned_crimes_2016.csv`.
+6. **Prior to Generating the Word Report:** Always ensure the pipeline has run so [`generate_report_docx.py`](generate_report_docx.py) can embed the latest figures and tables from `outputs/`.
+
+---
+
+### 📋 Complete Project Execution Lifecycle
+
 ```
+               ┌────────────────────────────────────────────────────────┐
+               │              Step 1: Execute ML Pipeline               │
+               │               python run_pipeline.py                   │
+               └──────────────────────────┬─────────────────────────────┘
+                                          │
+                   ┌──────────────────────┴──────────────────────┐
+                   ▼                                             ▼
+       ┌────────────────────────┐                   ┌────────────────────────┐
+       │   data/ (Input Cache)  │                   │   outputs/ (Artifacts) │
+       │ cleaned_crimes_2016.csv│                   │  • 5 PNG Visualizations│
+       └────────────────────────┘                   │  • top_hotspots.csv    │
+                   │                                │  • hotspots_map.html   │
+                   │                                └────────────┬───────────┘
+                   │                                             │
+                   │ Reads from outputs/                         │
+                   ▼                                             ▼
+┌──────────────────────────────────────┐     ┌──────────────────────────────────────┐
+│     Step 2: Generate Word Report     │     │    Step 3: Rebuild Jupyter Notebook  │
+│    python generate_report_docx.py    │     │       python create_notebook.py      │
+│  Outputs: report/project_report.docx │     │ Outputs: notebooks/hotspot_analysis  │
+└──────────────────────────────────────┘     └──────────────────────────────────────┘
+                   │
+                   ▼
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│                     Interactive Exploration in Jupyter                            │
+│                 jupyter notebook notebooks/hotspot_analysis.ipynb                 │
+└───────────────────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 📤 Output Artifacts & Persistence Guide
+
+All artifacts produced by the clustering pipeline are saved in the `outputs/` folder:
+
+### 1. Generated Output Files
+
+| File | Format | Description & Usage |
+| :--- | :---: | :--- |
+| **`outputs/hotspots_map.html`** | HTML/Leaflet | **Interactive Geospatial Map**: Features OpenStreetMap base tiles, toggleable crime density heatmap, cluster centroid markers with rich HTML popup profiles, 90th-percentile cluster radius circles, and sampled noise points. Open directly in any web browser. |
+| **`outputs/top_hotspots.csv`** | CSV | **Hotspot Risk Registry**: Ranked tabular data of all detected hotspots including risk rank, cluster ID, incident count, geographic centroid (latitude/longitude), radius (km), dominant crime type, peak operational hour, and arrest yield (%). |
+| **`outputs/top10_hotspots_chart.png`** | PNG (300 DPI) | **Ranked Bar Chart**: Visual comparison of the top 10 highest-density crime hotspots displaying total incidents, dominant crime, peak hour, and arrest rates. |
+| **`outputs/k_distance_plot.png`** | PNG (300 DPI) | **Parameter Tuning Curve**: Sorted k-nearest neighbor Haversine distance graph displaying the elbow inflection point used to empirically choose $\epsilon$. |
+| **`outputs/crime_type_distribution.png`** | PNG (300 DPI) | **EDA Incident Frequency**: Horizontal bar chart showing frequency and percentage shares of top crime classifications. |
+| **`outputs/temporal_distribution.png`** | PNG (300 DPI) | **Temporal Dynamics**: Dual-panel chart detailing hourly distribution (24-hour cycle highlighting peak hour) and day-of-week incident frequencies. |
+| **`outputs/cluster_distribution.png`** | PNG (300 DPI) | **Cluster Diagnostic Plots**: Hotspot size distribution histogram (median and mean sizes) alongside scatter plot of spatial radius vs. incident density color-coded by arrest rate. |
+
+### 2. Directory Persistence & Regeneration Matrix
+
+| Directory / File | Type | Safe to Delete? | What Happens If Deleted? | How to Regenerate |
+| :--- | :---: | :---: | :--- | :--- |
+| **`outputs/*`** | Generated Artifacts | **YES** | Downstream Word report will lack embedded charts/tables until regenerated. | Run `python run_pipeline.py` |
+| **`data/cleaned_crimes_2016.csv`** | Cleaned Input Data | **NO** (Unless `crimes.csv` exists) | Script and notebook will fail with `FileNotFoundError` unless raw `crimes.csv` is present. | Auto-generated from `crimes.csv` if raw file is present; otherwise restore from backup. |
+| **`report/project_report.docx`** | Formatted Document | **YES** | Word deliverable is removed. | Run `python generate_report_docx.py` |
+| **`report/project_report.md`** | Markdown Document | **NO** | Static Markdown documentation is removed. | Restore from Git/backup. |
+| **`notebooks/hotspot_analysis.ipynb`** | Jupyter Notebook | **YES** | Interactive notebook is removed. | Run `python create_notebook.py` |
 
 ---
 
@@ -124,37 +221,6 @@ $$\epsilon_{\text{rad}} = \frac{\epsilon_{\text{km}}}{6371.0088} = \frac{0.20}{6
 
 ---
 
-## 📊 Key Results & Insights
-
-### 1. Clustering Performance Summary
-
-| Metric | Result | Interpretation |
-|---|---|---|
-| **Total Incidents Analyzed** | 50,000 | Representative sample of 2016 incidents |
-| **Hotspots Detected** | **204** | Discrete high-density crime corridors |
-| **Clustered Crimes** | 30,043 (60.09%) | High concentration in actionable zones |
-| **Noise Incidents Filtered** | 19,957 (39.91%) | Random, non-repeating crimes isolated |
-| **Haversine Silhouette Score** | **0.1223** | Positive separation on spherical geometry |
-| **Davies-Bouldin Index** | **0.6414** | Strong compactness relative to cluster separation |
-| **Largest Hotspot** | 5,530 crimes | Primary South/West commercial & residential corridor |
-
-### 2. Top 10 High-Risk Crime Hotspots in Chicago
-
-| Risk Rank | Cluster ID | Incident Count | Dominant Crime | Share (%) | Peak Hour | Patrol Shift | Arrest Rate | Effective Radius | Dominant Location |
-|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|:---:|
-| **#1** | 2 | 5,530 | BATTERY | 27.5% | 19:00 | Evening (18-24) | 32.9% | 3.32 km | STREET |
-| **#2** | 0 | 3,719 | THEFT | 46.8% | 12:00 | Afternoon (12-18) | 18.2% | 2.18 km | STREET / RETAIL |
-| **#3** | 10 | 1,137 | BATTERY | 29.8% | 11:00 | Morning (06-12) | 28.9% | 1.35 km | STREET |
-| **#4** | 5 | 829 | BATTERY | 28.1% | 15:00 | Afternoon (12-18) | 19.1% | 0.98 km | APARTMENT |
-| **#5** | 8 | 795 | THEFT | 38.6% | 00:00 | Night (00-06) | 16.9% | 1.22 km | STREET |
-| **#6** | 26 | 707 | BATTERY | 26.9% | 12:00 | Afternoon (12-18) | 18.1% | 1.26 km | APARTMENT |
-| **#7** | 24 | 703 | THEFT | 41.2% | 21:00 | Evening (18-24) | 10.1% | 1.31 km | STREET |
-| **#8** | 6 | 649 | BATTERY | 30.5% | 22:00 | Evening (18-24) | 29.1% | 1.38 km | STREET |
-| **#9** | 14 | 636 | BATTERY | 27.4% | 18:00 | Evening (18-24) | 21.5% | 1.02 km | APARTMENT |
-| **#10** | 12 | 560 | BATTERY | 31.2% | 16:00 | Afternoon (12-18) | 25.0% | 0.76 km | APARTMENT |
-
----
-
 ## 🗺️ Interactive Folium Geospatial Map
 
 The interactive map is generated at `outputs/hotspots_map.html` and includes:
@@ -174,18 +240,6 @@ The interactive map is generated at `outputs/hotspots_map.html` and includes:
 
 ---
 
-## 👮 Operational Law Enforcement Recommendations
-
-1. **Shift Staggering:**
-   - Over 65% of violent incidents in battery hotspots occur between **16:00 and 22:00**. Shift changeovers should be scheduled outside this peak window to ensure maximum patrol presence.
-2. **Crime-Specific Patrol Tactics:**
-   - **Theft Corridors (e.g., Hotspot #2 - Downtown Loop):** Deploy plainclothes units and coordinate with commercial loss prevention teams during midday shopping hours (11:00-14:00).
-   - **Battery Hotspots (e.g., Hotspot #1, #3):** Deploy high-visibility marked patrol cruisers and foot patrols during evening and late-night hours (18:00-02:00).
-3. **Computer-Aided Dispatch (CAD) Geofencing:**
-   - Export cluster centroids and radii directly into dispatch systems to automatically alert responding officers when entering known high-density corridors.
-
----
-
 ## ⚠️ Limitations & Future Work
 
 - **Uniform Density Threshold:** Standard DBSCAN applies a single global $\epsilon$, which can under-cluster lower-density suburban zones. Future extensions should incorporate **HDBSCAN** for multi-density clustering.
@@ -196,6 +250,6 @@ The interactive map is generated at `outputs/hotspots_map.html` and includes:
 
 ## 📄 License & Attribution
 
-- **Dataset:** Chicago Police Department Crime Dataset (`crimes.csv`).
+- **Dataset:** Chicago Police Department Crime Dataset (`crimes.csv`), available on [Kaggle: Crimes in Chicago](https://www.kaggle.com/datasets/currie32/crimes-in-chicago).
 - **Blueprint:** `project_blueprint.md`.
 - **Implementation:** Unsupervised Machine Learning with Scikit-Learn & Folium.
